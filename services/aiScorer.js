@@ -8,11 +8,10 @@ const openai = process.env.OPENAI_API_KEY ? new OpenAI({
 
 // Provider configurations
 const PROVIDERS = {
-  openai: {
-    name: 'OpenAI',
-    model: 'gpt-3.5-turbo',
-    costPer1K: 0.0015, // $0.0015 per 1K tokens (input)
-    costPer1KOutput: 0.002
+  rule: {
+    name: 'Rule-Based (FREE)',
+    model: 'heuristic',
+    costPer1K: 0 // Completely free
   },
   groq: {
     name: 'Groq',
@@ -26,6 +25,12 @@ const PROVIDERS = {
     costPer1K: 0.0006, // Very cheap
     baseURL: 'https://api.together.xyz/v1'
   },
+  openai: {
+    name: 'OpenAI',
+    model: 'gpt-3.5-turbo',
+    costPer1K: 0.0015, // $0.0015 per 1K tokens (input)
+    costPer1KOutput: 0.002
+  },
   local: {
     name: 'Local/Ollama',
     model: 'llama3',
@@ -34,15 +39,21 @@ const PROVIDERS = {
   }
 };
 
-// Default provider (can be changed via env)
-const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'groq';
+// Default provider (FREE: uses rule-based if no API key)
+const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'rule';
 
-// Score a lead using AI
+// Score a lead using AI or rule-based
 const scoreLead = async (leadText, provider = DEFAULT_PROVIDER) => {
+  // Always use rule-based if explicitly set or if no API keys available
+  if (provider === 'rule') {
+    return enhancedRuleBasedScoring(leadText);
+  }
+  
   const config = PROVIDERS[provider];
   
   if (!config) {
-    throw new Error(`Unknown provider: ${provider}`);
+    console.warn(`Unknown provider: ${provider}, using rule-based`);
+    return enhancedRuleBasedScoring(leadText);
   }
 
   const prompt = `Analyze this lead and classify as Hot, Warm, or Cold based on buying intent.
@@ -61,19 +72,7 @@ Respond in JSON format:
   try {
     let response;
 
-    if (provider === 'openai' && openai) {
-      // OpenAI
-      response = await openai.chat.completions.create({
-        model: config.model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 300
-      });
-      
-      const content = response.choices[0].message.content;
-      return parseAIResponse(content);
-      
-    } else if (provider === 'groq' && process.env.GROQ_API_KEY) {
+    if (provider === 'groq' && process.env.GROQ_API_KEY) {
       // Groq - Fast and cheap!
       response = await axios.post(`${config.baseURL}/chat/completions`, {
         model: config.model,
@@ -101,6 +100,18 @@ Respond in JSON format:
       const content = response.data.choices[0].message.content;
       return parseAIResponse(content);
       
+    } else if (provider === 'openai' && openai) {
+      // OpenAI
+      response = await openai.chat.completions.create({
+        model: config.model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 300
+      });
+      
+      const content = response.choices[0].message.content;
+      return parseAIResponse(content);
+      
     } else if (provider === 'local') {
       // Local Ollama - FREE!
       try {
@@ -116,16 +127,16 @@ Respond in JSON format:
         return parseAIResponse(content);
       } catch (e) {
         console.log('Local LLM not available, falling back to rule-based');
-        return ruleBasedScoring(leadText);
+        return enhancedRuleBasedScoring(leadText);
       }
     }
     
     // Fallback to rule-based if no AI available
-    return ruleBasedScoring(leadText);
+    return enhancedRuleBasedScoring(leadText);
     
   } catch (error) {
     console.error(`AI scoring error (${provider}):`, error.message);
-    return ruleBasedScoring(leadText);
+    return enhancedRuleBasedScoring(leadText);
   }
 };
 
@@ -148,54 +159,168 @@ const parseAIResponse = (content) => {
     console.log('Failed to parse AI response, using fallback');
   }
   
-  return ruleBasedScoring(content);
+  return enhancedRuleBasedScoring(content);
 };
 
-// Rule-based fallback (FREE - no AI needed)
-const ruleBasedScoring = (text) => {
+// Enhanced Rule-based scoring (FREE - no AI needed)
+// Sophisticated keyword matching with weighted scoring
+const enhancedRuleBasedScoring = (text) => {
   const lower = text.toLowerCase();
   
-  // Hot signals
-  const hotSignals = [
-    'urgent', 'asap', 'immediately', 'this week',
-    '$50k', '$100k', '$500k', '$1m', 'budget',
-    'hiring now', 'start monday', 'ready to buy',
-    'decision made', 'approved budget'
+  // Weighted keyword categories
+  const SIGNALS = {
+    hot: {
+      urgent: [
+        'urgent', 'asap', 'immediately', 'this week', 'today',
+        'hiring now', 'start asap', 'need asap', 'quickly',
+        'emergency', 'critical', 'deadline', 'rush'
+      ],
+      budget: [
+        '$50k', '$100k', '$500k', '$1m', '$1M', 'million',
+        'budget approved', 'allocated budget', 'funding secured',
+        'series a', 'series b', 'raised', 'just funded'
+      ],
+      decision: [
+        'decision made', 'approved', 'ready to buy', 'ready to start',
+        'signed off', 'green light', 'go ahead', 'confirmed'
+      ],
+      action: [
+        'book a call', 'schedule demo', 'send proposal',
+        'lets talk', 'contact us', 'reach out'
+      ]
+    },
+    warm: {
+      interest: [
+        'interested', 'looking for', 'seeking', 'searching for',
+        'considering', 'evaluating', 'reviewing options'
+      ],
+      research: [
+        'comparing', 'research', 'explore', 'learn more',
+        'get quote', 'pricing', 'cost', 'how much'
+      ],
+      timing: [
+        'next month', 'next quarter', 'soon', 'upcoming',
+        'planning to', 'thinking about', 'might need'
+      ]
+    },
+    cold: {
+      vague: [
+        'maybe', 'possibly', 'not sure', 'just looking',
+        'curious', 'information', 'general inquiry'
+      ],
+      future: [
+        'someday', 'eventually', 'in the future',
+        'not now', 'later', 'next year'
+      ]
+    }
+  };
+  
+  // Calculate weighted scores
+  let hotScore = 0;
+  let warmScore = 0;
+  let coldScore = 0;
+  let matchedSignals = [];
+  
+  // Check hot signals (weighted 3x)
+  Object.values(SIGNALS.hot).forEach(category => {
+    category.forEach(keyword => {
+      if (lower.includes(keyword.toLowerCase())) {
+        hotScore += 3;
+        matchedSignals.push(keyword);
+      }
+    });
+  });
+  
+  // Check warm signals (weighted 1x)
+  Object.values(SIGNALS.warm).forEach(category => {
+    category.forEach(keyword => {
+      if (lower.includes(keyword.toLowerCase())) {
+        warmScore += 1;
+        matchedSignals.push(keyword);
+      }
+    });
+  });
+  
+  // Check cold signals (weighted -1x)
+  Object.values(SIGNALS.cold).forEach(category => {
+    category.forEach(keyword => {
+      if (lower.includes(keyword.toLowerCase())) {
+        coldScore += 1;
+      }
+    });
+  });
+  
+  // Extract budget mentions
+  const budgetPatterns = [
+    /\$[\d,]+(?:k|K|\s*thousand)?/,
+    /\$[\d,]+(?:m|M|\s*million)?/,
+    /\$\d+(?:,\d{3})*(?:\.\d{2})?/,
+    /\bdollar\s+budget\b/i,
+    /\bbudget\s+of\s+\$?\d+/i
   ];
   
-  // Warm signals  
-  const warmSignals = [
-    'interested', 'looking for', 'considering',
-    'evaluation', 'comparing', 'quote',
-    'proposal', 'demo', 'pilot'
+  let budgetSignal = null;
+  for (const pattern of budgetPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      budgetSignal = match[0];
+      hotScore += 2; // Budget mention is a strong signal
+      break;
+    }
+  }
+  
+  // Extract urgency indicators
+  const urgencyPatterns = [
+    /\b(asap|urgent|immediately|this week|today)\b/i,
+    /\b(\d+\s*days?)\b/i,
+    /\bdeadline\b/i,
+    /\bhiring\s+now\b/i
   ];
   
-  let hotCount = hotSignals.filter(s => lower.includes(s)).length;
-  let warmCount = warmSignals.filter(s => lower.includes(s)).length;
+  let urgencySignal = null;
+  for (const pattern of urgencyPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      urgencySignal = match[0];
+      break;
+    }
+  }
   
-  // Check for budget mentions
-  const budgetMatch = text.match(/\$[\d,]+(?:k|K)?|\$\d+(?:,\d{3})*/);
-  const budgetSignal = budgetMatch ? budgetMatch[0] : null;
+  // Calculate final score
+  const totalScore = hotScore + warmScore - coldScore;
   
-  // Determine score
-  let score = 'cold';
-  let reason = 'No strong buying signals detected';
+  // Determine category with detailed reasoning
+  let score, reason, confidence;
   
-  if (hotCount >= 2) {
+  if (totalScore >= 6) {
     score = 'hot';
-    reason = `Strong buying signals: ${hotCount} urgency indicators`;
-  } else if (hotCount >= 1 || warmCount >= 2) {
+    confidence = Math.min(85 + (totalScore - 6) * 2, 98);
+    reason = matchedSignals.length > 0 
+      ? `Strong buying signals detected: ${matchedSignals.slice(0, 3).join(', ')}`
+      : 'Multiple high-intent indicators present';
+  } else if (totalScore >= 2) {
     score = 'warm';
-    reason = `Moderate interest: ${warmCount} positive signals`;
+    confidence = Math.min(70 + totalScore * 3, 85);
+    reason = matchedSignals.length > 0
+      ? `Moderate interest: ${matchedSignals.slice(0, 2).join(', ')}`
+      : 'Some buying signals detected';
+  } else {
+    score = 'cold';
+    confidence = Math.max(40, 60 - coldScore * 5);
+    reason = coldScore > 0 
+      ? 'Low intent signals, vague or future timeline'
+      : 'No strong buying signals detected';
   }
   
   return {
     score,
     reason,
-    confidence: hotCount >= 2 ? 85 : warmCount >= 2 ? 70 : 50,
+    confidence: Math.round(confidence),
     budgetSignal,
-    urgencySignal: hotCount > 0 ? 'Urgency keywords detected' : null,
-    method: 'rule-based'
+    urgencySignal,
+    method: 'rule-based',
+    signals: matchedSignals.slice(0, 5),
+    scoreDetails: { hotScore, warmScore, coldScore, totalScore }
   };
 };
 
@@ -238,10 +363,14 @@ const testProviders = async (sampleLead) => {
   return results;
 };
 
+// Legacy alias for backward compatibility
+const ruleBasedScoring = enhancedRuleBasedScoring;
+
 module.exports = {
   scoreLead,
   getCostEstimate,
   testProviders,
   PROVIDERS,
-  ruleBasedScoring // Export for direct use
+  enhancedRuleBasedScoring,
+  ruleBasedScoring // Legacy alias
 };
