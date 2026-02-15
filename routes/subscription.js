@@ -2,96 +2,60 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { User } = require('../models');
 
 const PLANS = {
-  free: {
-    id: 'free',
-    name: 'Free Trial',
-    price: 0,
-    leadsLimit: 50,
-    features: ['50 leads', '2 data sources', 'Basic scoring', 'Email support']
-  },
   starter: {
-    id: 'starter',
     name: 'Starter',
     priceId: process.env.STRIPE_STARTER_PRICE_ID,
-    price: 299,
-    leadsLimit: 500,
-    features: ['500 leads/month', '2 data sources', 'Basic enrichment', 'Email support', 'Airtable integration']
+    leadsLimit: 200
   },
   growth: {
-    id: 'growth',
     name: 'Growth',
     priceId: process.env.STRIPE_GROWTH_PRICE_ID,
-    price: 799,
-    leadsLimit: 2000,
-    features: ['2,000 leads/month', 'All data sources', 'Advanced enrichment', 'Priority support', 'CRM integrations', 'Custom scoring']
+    leadsLimit: 1000
   },
   agency: {
-    id: 'agency',
     name: 'Agency',
     priceId: process.env.STRIPE_AGENCY_PRICE_ID,
-    price: 2000,
-    leadsLimit: 10000,
-    features: ['Unlimited leads', 'Custom sources', 'White-label dashboard', 'Dedicated support', 'API access', 'Custom integrations']
+    leadsLimit: 5000
   }
 };
 
-// Get all available plans
-const getPlans = async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      data: {
-        plans: Object.values(PLANS).map(p => ({
-          id: p.id,
-          name: p.name,
-          price: p.price,
-          leadsLimit: p.leadsLimit,
-          features: p.features
-        }))
-      }
-    });
-  } catch (error) {
-    console.error('Get plans error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch plans'
-    });
-  }
-};
-
-// Get current user's subscription
+// Get subscription details
 const getSubscription = async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.id, {
-      attributes: { exclude: ['password'] }
-    });
-
-    const currentPlan = PLANS[user.plan] || PLANS.free;
-
+    const user = await User.findByPk(req.user.id);
+    
     res.json({
       success: true,
       data: {
-        subscription: {
-          plan: user.plan,
-          planStatus: user.planStatus,
-          leadsLimit: user.leadsLimit,
-          leadsUsedThisMonth: user.leadsUsedThisMonth,
-          leadsRemaining: Math.max(0, user.leadsLimit - user.leadsUsedThisMonth),
-          currentPeriodEnd: user.currentPeriodEnd,
-          cancelAtPeriodEnd: user.cancelAtPeriodEnd,
-          stripeCustomerId: user.stripeCustomerId,
-          stripeSubscriptionId: user.stripeSubscriptionId
-        },
-        plan: currentPlan
+        plan: user.plan,
+        status: user.planStatus,
+        leadsLimit: user.leadsLimit,
+        leadsUsed: user.leadsUsedThisMonth,
+        currentPeriodEnd: user.currentPeriodEnd
       }
     });
   } catch (error) {
     console.error('Get subscription error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch subscription'
+      message: 'Internal server error'
     });
   }
+};
+
+// Get available plans
+const getPlans = async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      plans: [
+        { id: 'free', name: 'Free', price: 0, leadsLimit: 50 },
+        { id: 'starter', name: 'Starter', price: 49, leadsLimit: 200 },
+        { id: 'growth', name: 'Growth', price: 149, leadsLimit: 1000 },
+        { id: 'agency', name: 'Agency', price: 399, leadsLimit: 5000 }
+      ]
+    }
+  });
 };
 
 // Create checkout session
@@ -99,25 +63,22 @@ const createCheckout = async (req, res) => {
   try {
     const { plan, billingPeriod = 'monthly' } = req.body;
     const planConfig = PLANS[plan];
-
-    if (!planConfig || plan === 'free') {
+    
+    if (!planConfig) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid plan selected'
+        message: 'Invalid plan'
       });
     }
 
     const user = await User.findByPk(req.user.id);
-
-    // Create Stripe customer if doesn't exist
+    
+    // Create Stripe customer if needed
     let customerId = user.stripeCustomerId;
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
-        name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || undefined,
-        metadata: {
-          userId: user.id
-        }
+        metadata: { userId: user.id }
       });
       customerId = customer.id;
       user.stripeCustomerId = customerId;
@@ -133,10 +94,7 @@ const createCheckout = async (req, res) => {
         quantity: 1
       }],
       mode: 'subscription',
-      subscription_data: {
-        trial_period_days: 7 // 7-day free trial
-      },
-      success_url: `${process.env.FRONTEND_URL}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${process.env.FRONTEND_URL}/billing?success=true`,
       cancel_url: `${process.env.FRONTEND_URL}/billing?canceled=true`,
       metadata: {
         userId: user.id,
@@ -146,10 +104,7 @@ const createCheckout = async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        sessionId: session.id,
-        url: session.url
-      }
+      data: { url: session.url }
     });
   } catch (error) {
     console.error('Create checkout error:', error);
@@ -164,7 +119,7 @@ const createCheckout = async (req, res) => {
 const createPortal = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
-
+    
     if (!user.stripeCustomerId) {
       return res.status(400).json({
         success: false,
@@ -179,9 +134,7 @@ const createPortal = async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        url: session.url
-      }
+      data: { url: session.url }
     });
   } catch (error) {
     console.error('Create portal error:', error);
@@ -192,11 +145,11 @@ const createPortal = async (req, res) => {
   }
 };
 
-// Cancel subscription (at period end)
+// Cancel subscription
 const cancelSubscription = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
-
+    
     if (!user.stripeSubscriptionId) {
       return res.status(400).json({
         success: false,
@@ -204,17 +157,16 @@ const cancelSubscription = async (req, res) => {
       });
     }
 
-    // Cancel at period end
     await stripe.subscriptions.update(user.stripeSubscriptionId, {
       cancel_at_period_end: true
     });
 
-    user.cancelAtPeriodEnd = true;
+    user.planStatus = 'cancelled';
     await user.save();
 
     res.json({
       success: true,
-      message: 'Subscription will cancel at end of billing period'
+      message: 'Subscription will cancel at period end'
     });
   } catch (error) {
     console.error('Cancel subscription error:', error);
@@ -229,7 +181,7 @@ const cancelSubscription = async (req, res) => {
 const reactivateSubscription = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
-
+    
     if (!user.stripeSubscriptionId) {
       return res.status(400).json({
         success: false,
@@ -237,17 +189,16 @@ const reactivateSubscription = async (req, res) => {
       });
     }
 
-    // Remove cancel_at_period_end
     await stripe.subscriptions.update(user.stripeSubscriptionId, {
       cancel_at_period_end: false
     });
 
-    user.cancelAtPeriodEnd = false;
+    user.planStatus = 'active';
     await user.save();
 
     res.json({
       success: true,
-      message: 'Subscription reactivated successfully'
+      message: 'Subscription reactivated'
     });
   } catch (error) {
     console.error('Reactivate subscription error:', error);
@@ -259,9 +210,8 @@ const reactivateSubscription = async (req, res) => {
 };
 
 module.exports = {
-  PLANS,
-  getPlans,
   getSubscription,
+  getPlans,
   createCheckout,
   createPortal,
   cancelSubscription,

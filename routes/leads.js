@@ -194,9 +194,138 @@ const getLeadStats = async (req, res) => {
   }
 };
 
+// Delete lead
+const deleteLead = async (req, res) => {
+  try {
+    const lead = await Lead.findOne({
+      where: {
+        id: req.params.id,
+        userId: req.user.id
+      }
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lead not found'
+      });
+    }
+
+    await lead.destroy();
+
+    res.json({
+      success: true,
+      message: 'Lead deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete lead error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Toggle favorite
+const toggleFavorite = async (req, res) => {
+  try {
+    const lead = await Lead.findOne({
+      where: {
+        id: req.params.id,
+        userId: req.user.id
+      }
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lead not found'
+      });
+    }
+
+    lead.isFavorite = !lead.isFavorite;
+    await lead.save();
+
+    res.json({
+      success: true,
+      message: lead.isFavorite ? 'Lead added to favorites' : 'Lead removed from favorites',
+      data: { isFavorite: lead.isFavorite }
+    });
+  } catch (error) {
+    console.error('Toggle favorite error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Export lead
+const exportLead = async (req, res) => {
+  try {
+    const lead = await Lead.findOne({
+      where: {
+        id: req.params.id,
+        userId: req.user.id
+      }
+    });
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: 'Lead not found'
+      });
+    }
+
+    // Add to exported list
+    const exportedTo = lead.exportedTo || [];
+    exportedTo.push('csv');
+    lead.exportedTo = exportedTo;
+    await lead.save();
+
+    res.json({
+      success: true,
+      message: 'Lead exported successfully',
+      data: { lead }
+    });
+  } catch (error) {
+    console.error('Export lead error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Get available lead sources
+const getSources = async (req, res) => {
+  try {
+    const sources = await Lead.findAll({
+      where: { userId: req.user.id },
+      attributes: ['source'],
+      group: ['source']
+    });
+
+    res.json({
+      success: true,
+      data: { sources: sources.map(s => s.source) }
+    });
+  } catch (error) {
+    console.error('Get sources error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getLeads,
   getLead,
   updateLead,
-  getLeadStats
+  getLeadStats,
+  deleteLead,
+  toggleFavorite,
+  exportLead,
+  getSources
 };
