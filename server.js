@@ -14,6 +14,7 @@ const authController = require('./routes/auth');
 const leadsController = require('./routes/leads');
 const settingsController = require('./routes/settings');
 const subscriptionController = require('./routes/subscription');
+const nichesController = require('./routes/niches');
 const { 
   authenticateApiKey, 
   getLeadsPublic, 
@@ -102,6 +103,15 @@ app.post('/api/subscription/reactivate', authenticate, subscriptionController.re
 
 // Stripe webhooks (public but signed)
 app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), subscriptionController.handleWebhook);
+
+// Niche routes (protected)
+app.get('/api/niches', authenticate, nichesController.getNiches);
+app.get('/api/niches/:id', authenticate, nichesController.getNicheDetails);
+app.get('/api/niches/current', authenticate, nichesController.getCurrentNiche);
+app.post('/api/niches/apply', authenticate, nichesController.applyNiche);
+app.post('/api/niches/custom', authenticate, nichesController.createCustomNiche);
+app.put('/api/niches/keywords', authenticate, nichesController.updateKeywords);
+app.put('/api/niches/sources', authenticate, nichesController.updateSources);
 
 // 404 handler
 app.use((req, res) => {
