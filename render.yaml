@@ -21,7 +21,7 @@ services:
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: FRONTEND_URL
-        value: https://ai-sdr-app.vercel.app
+        value: https://ai-sdr-dashboard.vercel.app
 
   - type: cron
     name: ai-sdr-worker
