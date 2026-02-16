@@ -4,71 +4,63 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 const { body } = require('express-validator');
 
 const db = require('./models');
 const { authenticate } = require('./middleware/auth');
+
+// Route controllers
 const authController = require('./routes/auth');
 const leadsController = require('./routes/leads');
-const subscriptionController = require('./routes/subscription');
-const stripeController = require('./routes/stripe');
-const webhookController = require('./routes/webhooks');
 const settingsController = require('./routes/settings');
-const adminController = require('./routes/admin');
+const subscriptionController = require('./routes/subscription');
+const { 
+  authenticateApiKey, 
+  getLeadsPublic, 
+  getLeadPublic, 
+  updateLeadPublic,
+  getStatsPublic,
+  receiveWebhook,
+  getApiUsage
+} = require('./routes/apiPublic');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Security middleware
+// Middleware
 app.use(helmet());
 app.use(compression());
 app.use(morgan('dev'));
-
-// Stripe webhook needs raw body
-app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
-
-// CORS configuration
-const corsOptions = {
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:3000',
-    process.env.LANDING_URL || 'http://localhost:5000',
-    'https://ai-sdr.vercel.app',
-    'https://ai-sdr-dashboard.vercel.app'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-};
-app.use(cors(corsOptions));
-
-// Body parsing
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// Rate limiting for API
-app.use('/api/', limiter);
 
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
-    timestamp: new Date().toISOString(),
-    version: '2.0.0'
+    version: '2.0.0',
+    timestamp: new Date().toISOString() 
   });
 });
 
-// ========== PUBLIC ROUTES ==========
+// ============ PUBLIC API (v1) ============
+// These routes use API key authentication for n8n/Make.com
 
-// Auth routes
+app.get('/v1/leads', authenticateApiKey, getLeadsPublic);
+app.get('/v1/leads/stats', authenticateApiKey, getStatsPublic);
+app.get('/v1/leads/:id', authenticateApiKey, getLeadPublic);
+app.put('/v1/leads/:id', authenticateApiKey, updateLeadPublic);
+app.get('/v1/usage', authenticateApiKey, getApiUsage);
+app.post('/v1/webhooks/leads', authenticateApiKey, receiveWebhook);
+
+// ============ AUTHENTICATED API ============
+// These routes use JWT authentication for web dashboard
+
+// Auth routes (public)
 app.post('/api/auth/register', [
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 8 }),
@@ -81,69 +73,35 @@ app.post('/api/auth/login', [
   body('password').exists()
 ], authController.login);
 
-app.post('/api/auth/forgot-password', [
-  body('email').isEmail().normalizeEmail()
-], authController.forgotPassword);
-
-app.post('/api/auth/reset-password', [
-  body('token').exists(),
-  body('password').isLength({ min: 8 })
-], authController.resetPassword);
-
-// Stripe webhook (raw body, no auth)
-app.post('/api/webhooks/stripe', webhookController.stripeWebhook);
-
-// ========== PROTECTED ROUTES ==========
-
-// User profile
+// User routes (protected)
 app.get('/api/user/profile', authenticate, authController.getMe);
 app.put('/api/user/profile', authenticate, authController.updateProfile);
-app.put('/api/user/password', authenticate, [
-  body('currentPassword').exists(),
-  body('newPassword').isLength({ min: 8 })
-], authController.updatePassword);
 
-// Leads
+// Settings routes (protected)
+app.get('/api/settings/ai', authenticate, settingsController.getAiSettings);
+app.put('/api/settings/ai', authenticate, settingsController.updateAiSettings);
+app.post('/api/settings/ai/test', authenticate, settingsController.testAiConnection);
+app.get('/api/settings/api-credentials', authenticate, settingsController.getApiCredentials);
+app.post('/api/settings/api-key/regenerate', authenticate, settingsController.regenerateApiKey);
+app.put('/api/settings/webhook', authenticate, settingsController.updateWebhook);
+app.get('/api/settings/integrations', authenticate, settingsController.getIntegrationTemplates);
+
+// Leads routes (protected)
 app.get('/api/leads', authenticate, leadsController.getLeads);
 app.get('/api/leads/stats', authenticate, leadsController.getLeadStats);
-app.get('/api/leads/sources', authenticate, leadsController.getSources);
 app.get('/api/leads/:id', authenticate, leadsController.getLead);
 app.put('/api/leads/:id', authenticate, leadsController.updateLead);
-app.delete('/api/leads/:id', authenticate, leadsController.deleteLead);
-app.post('/api/leads/:id/favorite', authenticate, leadsController.toggleFavorite);
-app.post('/api/leads/:id/export', authenticate, leadsController.exportLead);
 
-// Settings
-app.get('/api/settings', authenticate, settingsController.getSettings);
-app.put('/api/settings', authenticate, settingsController.updateSettings);
-app.put('/api/settings/sources', authenticate, settingsController.updateSources);
-app.put('/api/settings/keywords', authenticate, settingsController.updateKeywords);
-
-// Integrations
-app.get('/api/integrations', authenticate, settingsController.getIntegrations);
-app.post('/api/integrations/webhook', authenticate, settingsController.updateWebhook);
-app.post('/api/integrations/crm', authenticate, settingsController.connectCRM);
-app.delete('/api/integrations/crm/:type', authenticate, settingsController.disconnectCRM);
-
-// Subscription & Billing
+// Subscription routes (protected)
 app.get('/api/subscription', authenticate, subscriptionController.getSubscription);
-app.get('/api/subscription/plans', subscriptionController.getPlans);
-app.post('/api/subscription/checkout', authenticate, [
-  body('plan').isIn(['starter', 'growth', 'agency']),
-  body('billingPeriod').optional().isIn(['monthly', 'yearly'])
-], subscriptionController.createCheckout);
-app.post('/api/subscription/portal', authenticate, subscriptionController.createPortal);
+app.get('/api/subscription/plans', authenticate, subscriptionController.getPlans);
+app.post('/api/subscription/checkout', authenticate, subscriptionController.createCheckoutSession);
+app.post('/api/subscription/portal', authenticate, subscriptionController.createPortalSession);
 app.post('/api/subscription/cancel', authenticate, subscriptionController.cancelSubscription);
 app.post('/api/subscription/reactivate', authenticate, subscriptionController.reactivateSubscription);
 
-// Stripe setup intent (for adding payment method)
-app.post('/api/stripe/setup-intent', authenticate, stripeController.createSetupIntent);
-
-// Admin routes
-app.get('/api/admin/users', authenticate, adminController.listUsers);
-app.get('/api/admin/stats', authenticate, adminController.getStats);
-app.post('/api/admin/users/:id/leads', authenticate, adminController.addLeadsToUser);
-app.put('/api/admin/users/:id/plan', authenticate, adminController.updateUserPlan);
+// Stripe webhooks (public but signed)
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), subscriptionController.handleWebhook);
 
 // 404 handler
 app.use((req, res) => {
@@ -165,20 +123,21 @@ app.use((err, req, res, next) => {
 // Start server
 const startServer = async () => {
   try {
-    // Test database connection
     await db.sequelize.authenticate();
-    console.log('✅ Database connected successfully');
+    console.log('✅ Database connected');
 
-    // Sync models (in production, use migrations instead)
     await db.sequelize.sync({ alter: process.env.NODE_ENV === 'development' });
-    console.log('✅ Database models synchronized');
+    console.log('✅ Models synchronized');
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📚 Health check: http://localhost:${PORT}/health`);
+      console.log(`📚 API Docs:`);
+      console.log(`   - Dashboard API: /api/* (JWT auth)`);
+      console.log(`   - Public API: /v1/* (API key auth)`);
+      console.log(`   - Webhooks: /webhooks/*`);
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error('❌ Failed to start:', error);
     process.exit(1);
   }
 };

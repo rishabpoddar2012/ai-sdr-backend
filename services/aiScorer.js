@@ -1,58 +1,64 @@
-const { OpenAI } = require('openai');
 const axios = require('axios');
-
-// Initialize clients
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-}) : null;
 
 // Provider configurations
 const PROVIDERS = {
   rule: {
     name: 'Rule-Based (FREE)',
     model: 'heuristic',
-    costPer1K: 0 // Completely free
+    costPer1K: 0
   },
   groq: {
     name: 'Groq',
     model: 'llama3-8b-8192',
-    costPer1K: 0.0005, // $0.0005 per 1K tokens - 3x cheaper!
+    costPer1K: 0.0005,
     baseURL: 'https://api.groq.com/openai/v1'
   },
   together: {
     name: 'Together AI',
     model: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
-    costPer1K: 0.0006, // Very cheap
+    costPer1K: 0.0006,
     baseURL: 'https://api.together.xyz/v1'
   },
   openai: {
     name: 'OpenAI',
     model: 'gpt-3.5-turbo',
-    costPer1K: 0.0015, // $0.0015 per 1K tokens (input)
-    costPer1KOutput: 0.002
+    costPer1K: 0.0015,
+    baseURL: 'https://api.openai.com/v1'
   },
-  local: {
-    name: 'Local/Ollama',
-    model: 'llama3',
-    costPer1K: 0, // FREE if running locally
-    baseURL: process.env.LOCAL_LLM_URL || 'http://localhost:11434/v1'
+  anthropic: {
+    name: 'Anthropic',
+    model: 'claude-3-haiku-20240307',
+    costPer1K: 0.001,
+    baseURL: 'https://api.anthropic.com/v1'
+  },
+  custom: {
+    name: 'Custom/OpenAI-Compatible',
+    model: null, // User specifies
+    costPer1K: 0
   }
 };
 
-// Default provider (FREE: uses rule-based if no API key)
+// Default provider
 const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'rule';
 
 // Score a lead using AI or rule-based
-const scoreLead = async (leadText, provider = DEFAULT_PROVIDER) => {
-  // Always use rule-based if explicitly set or if no API keys available
+// Options: { apiKey, model, baseUrl } for user-provided credentials
+const scoreLead = async (leadText, provider = DEFAULT_PROVIDER, options = {}) => {
+  // Always use rule-based if explicitly set
   if (provider === 'rule') {
     return enhancedRuleBasedScoring(leadText);
   }
-  
+
   const config = PROVIDERS[provider];
-  
   if (!config) {
     console.warn(`Unknown provider: ${provider}, using rule-based`);
+    return enhancedRuleBasedScoring(leadText);
+  }
+
+  // If no API key provided and not using env vars, fall back to rule-based
+  const apiKey = options.apiKey;
+  if (!apiKey && provider !== 'rule') {
+    console.log(`No API key for ${provider}, using rule-based`);
     return enhancedRuleBasedScoring(leadText);
   }
 
@@ -71,71 +77,47 @@ Respond in JSON format:
 
   try {
     let response;
+    const baseURL = options.baseUrl || config.baseURL;
+    const model = options.model || config.model;
 
-    if (provider === 'groq' && process.env.GROQ_API_KEY) {
-      // Groq - Fast and cheap!
-      response = await axios.post(`${config.baseURL}/chat/completions`, {
-        model: config.model,
+    if (provider === 'anthropic') {
+      // Anthropic Claude
+      response = await axios.post(`${baseURL}/messages`, {
+        model: model,
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }]
+      }, {
+        headers: { 
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01'
+        }
+      });
+      
+      const content = response.data.content[0].text;
+      return parseAIResponse(content);
+      
+    } else {
+      // OpenAI-compatible API (Groq, Together, OpenAI, Custom)
+      response = await axios.post(`${baseURL}/chat/completions`, {
+        model: model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         max_tokens: 300
       }, {
-        headers: { 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` }
+        headers: { 
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
       });
       
       const content = response.data.choices[0].message.content;
       return parseAIResponse(content);
-      
-    } else if (provider === 'together' && process.env.TOGETHER_API_KEY) {
-      // Together AI
-      response = await axios.post(`${config.baseURL}/chat/completions`, {
-        model: config.model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 300
-      }, {
-        headers: { 'Authorization': `Bearer ${process.env.TOGETHER_API_KEY}` }
-      });
-      
-      const content = response.data.choices[0].message.content;
-      return parseAIResponse(content);
-      
-    } else if (provider === 'openai' && openai) {
-      // OpenAI
-      response = await openai.chat.completions.create({
-        model: config.model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 300
-      });
-      
-      const content = response.choices[0].message.content;
-      return parseAIResponse(content);
-      
-    } else if (provider === 'local') {
-      // Local Ollama - FREE!
-      try {
-        response = await axios.post(`${config.baseURL}/chat/completions`, {
-          model: config.model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3,
-          max_tokens: 300,
-          stream: false
-        });
-        
-        const content = response.data.choices[0].message.content;
-        return parseAIResponse(content);
-      } catch (e) {
-        console.log('Local LLM not available, falling back to rule-based');
-        return enhancedRuleBasedScoring(leadText);
-      }
     }
-    
-    // Fallback to rule-based if no AI available
-    return enhancedRuleBasedScoring(leadText);
     
   } catch (error) {
     console.error(`AI scoring error (${provider}):`, error.message);
+    // Fall back to rule-based on any error
     return enhancedRuleBasedScoring(leadText);
   }
 };
@@ -143,7 +125,6 @@ Respond in JSON format:
 // Parse AI JSON response
 const parseAIResponse = (content) => {
   try {
-    // Extract JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -162,66 +143,27 @@ const parseAIResponse = (content) => {
   return enhancedRuleBasedScoring(content);
 };
 
-// Enhanced Rule-based scoring (FREE - no AI needed)
-// Sophisticated keyword matching with weighted scoring
+// Enhanced Rule-based scoring (FREE)
 const enhancedRuleBasedScoring = (text) => {
   const lower = text.toLowerCase();
   
-  // Weighted keyword categories
   const SIGNALS = {
     hot: {
-      urgent: [
-        'urgent', 'asap', 'immediately', 'this week', 'today',
-        'hiring now', 'start asap', 'need asap', 'quickly',
-        'emergency', 'critical', 'deadline', 'rush'
-      ],
-      budget: [
-        '$50k', '$100k', '$500k', '$1m', '$1M', 'million',
-        'budget approved', 'allocated budget', 'funding secured',
-        'series a', 'series b', 'raised', 'just funded'
-      ],
-      decision: [
-        'decision made', 'approved', 'ready to buy', 'ready to start',
-        'signed off', 'green light', 'go ahead', 'confirmed'
-      ],
-      action: [
-        'book a call', 'schedule demo', 'send proposal',
-        'lets talk', 'contact us', 'reach out'
-      ]
+      urgent: ['urgent', 'asap', 'immediately', 'this week', 'today', 'hiring now', 'start asap'],
+      budget: ['$50k', '$100k', '$500k', '$1m', 'budget approved', 'series a', 'series b'],
+      decision: ['decision made', 'approved', 'ready to buy', 'ready to start'],
+      action: ['book a call', 'schedule demo', 'send proposal', 'lets talk']
     },
     warm: {
-      interest: [
-        'interested', 'looking for', 'seeking', 'searching for',
-        'considering', 'evaluating', 'reviewing options'
-      ],
-      research: [
-        'comparing', 'research', 'explore', 'learn more',
-        'get quote', 'pricing', 'cost', 'how much'
-      ],
-      timing: [
-        'next month', 'next quarter', 'soon', 'upcoming',
-        'planning to', 'thinking about', 'might need'
-      ]
-    },
-    cold: {
-      vague: [
-        'maybe', 'possibly', 'not sure', 'just looking',
-        'curious', 'information', 'general inquiry'
-      ],
-      future: [
-        'someday', 'eventually', 'in the future',
-        'not now', 'later', 'next year'
-      ]
+      interest: ['interested', 'looking for', 'seeking', 'considering', 'evaluating'],
+      research: ['comparing', 'research', 'explore', 'get quote', 'pricing'],
+      timing: ['next month', 'next quarter', 'soon', 'planning to']
     }
   };
   
-  // Calculate weighted scores
-  let hotScore = 0;
-  let warmScore = 0;
-  let coldScore = 0;
+  let hotScore = 0, warmScore = 0;
   let matchedSignals = [];
   
-  // Check hot signals (weighted 3x)
   Object.values(SIGNALS.hot).forEach(category => {
     category.forEach(keyword => {
       if (lower.includes(keyword.toLowerCase())) {
@@ -231,7 +173,6 @@ const enhancedRuleBasedScoring = (text) => {
     });
   });
   
-  // Check warm signals (weighted 1x)
   Object.values(SIGNALS.warm).forEach(category => {
     category.forEach(keyword => {
       if (lower.includes(keyword.toLowerCase())) {
@@ -241,75 +182,26 @@ const enhancedRuleBasedScoring = (text) => {
     });
   });
   
-  // Check cold signals (weighted -1x)
-  Object.values(SIGNALS.cold).forEach(category => {
-    category.forEach(keyword => {
-      if (lower.includes(keyword.toLowerCase())) {
-        coldScore += 1;
-      }
-    });
-  });
+  const budgetMatch = text.match(/\$[\d,]+(?:k|K)?|\$[\d,]+(?:m|M)?/i);
+  const budgetSignal = budgetMatch ? budgetMatch[0] : null;
+  if (budgetSignal) hotScore += 2;
   
-  // Extract budget mentions
-  const budgetPatterns = [
-    /\$[\d,]+(?:k|K|\s*thousand)?/,
-    /\$[\d,]+(?:m|M|\s*million)?/,
-    /\$\d+(?:,\d{3})*(?:\.\d{2})?/,
-    /\bdollar\s+budget\b/i,
-    /\bbudget\s+of\s+\$?\d+/i
-  ];
+  const totalScore = hotScore + warmScore;
   
-  let budgetSignal = null;
-  for (const pattern of budgetPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      budgetSignal = match[0];
-      hotScore += 2; // Budget mention is a strong signal
-      break;
-    }
-  }
-  
-  // Extract urgency indicators
-  const urgencyPatterns = [
-    /\b(asap|urgent|immediately|this week|today)\b/i,
-    /\b(\d+\s*days?)\b/i,
-    /\bdeadline\b/i,
-    /\bhiring\s+now\b/i
-  ];
-  
-  let urgencySignal = null;
-  for (const pattern of urgencyPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      urgencySignal = match[0];
-      break;
-    }
-  }
-  
-  // Calculate final score
-  const totalScore = hotScore + warmScore - coldScore;
-  
-  // Determine category with detailed reasoning
   let score, reason, confidence;
   
   if (totalScore >= 6) {
     score = 'hot';
     confidence = Math.min(85 + (totalScore - 6) * 2, 98);
-    reason = matchedSignals.length > 0 
-      ? `Strong buying signals detected: ${matchedSignals.slice(0, 3).join(', ')}`
-      : 'Multiple high-intent indicators present';
+    reason = `Strong buying signals: ${matchedSignals.slice(0, 3).join(', ')}`;
   } else if (totalScore >= 2) {
     score = 'warm';
     confidence = Math.min(70 + totalScore * 3, 85);
-    reason = matchedSignals.length > 0
-      ? `Moderate interest: ${matchedSignals.slice(0, 2).join(', ')}`
-      : 'Some buying signals detected';
+    reason = `Moderate interest: ${matchedSignals.slice(0, 2).join(', ')}`;
   } else {
     score = 'cold';
-    confidence = Math.max(40, 60 - coldScore * 5);
-    reason = coldScore > 0 
-      ? 'Low intent signals, vague or future timeline'
-      : 'No strong buying signals detected';
+    confidence = 50;
+    reason = 'No strong buying signals detected';
   }
   
   return {
@@ -317,17 +209,26 @@ const enhancedRuleBasedScoring = (text) => {
     reason,
     confidence: Math.round(confidence),
     budgetSignal,
-    urgencySignal,
+    urgencySignal: hotScore > 0 ? 'Urgency keywords detected' : null,
     method: 'rule-based',
-    signals: matchedSignals.slice(0, 5),
-    scoreDetails: { hotScore, warmScore, coldScore, totalScore }
+    signals: matchedSignals.slice(0, 5)
   };
 };
 
 // Get cost estimate
 const getCostEstimate = (provider = DEFAULT_PROVIDER, leadsCount = 1000) => {
   const config = PROVIDERS[provider];
-  const tokensPerLead = 500; // Approximate
+  if (!config || config.costPer1K === 0) {
+    return {
+      provider: config?.name || 'Rule-based',
+      leadsCount,
+      cost: 0,
+      costPerLead: 0,
+      note: 'Free - no API costs'
+    };
+  }
+  
+  const tokensPerLead = 500;
   const totalTokens = (tokensPerLead * leadsCount) / 1000;
   
   return {
@@ -339,38 +240,9 @@ const getCostEstimate = (provider = DEFAULT_PROVIDER, leadsCount = 1000) => {
   };
 };
 
-// Test all providers
-const testProviders = async (sampleLead) => {
-  const results = {};
-  
-  for (const [key, config] of Object.entries(PROVIDERS)) {
-    try {
-      const start = Date.now();
-      const result = await scoreLead(sampleLead, key);
-      results[key] = {
-        ...result,
-        latency: Date.now() - start,
-        status: 'success'
-      };
-    } catch (e) {
-      results[key] = {
-        status: 'failed',
-        error: e.message
-      };
-    }
-  }
-  
-  return results;
-};
-
-// Legacy alias for backward compatibility
-const ruleBasedScoring = enhancedRuleBasedScoring;
-
 module.exports = {
   scoreLead,
   getCostEstimate,
-  testProviders,
   PROVIDERS,
-  enhancedRuleBasedScoring,
-  ruleBasedScoring // Legacy alias
+  enhancedRuleBasedScoring
 };
