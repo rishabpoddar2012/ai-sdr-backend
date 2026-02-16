@@ -24,6 +24,7 @@ const {
   receiveWebhook,
   getApiUsage
 } = require('./routes/apiPublic');
+const demoController = require('./routes/demo');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -47,6 +48,16 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString() 
   });
 });
+
+// ============ DEMO / PUBLIC ROUTES ============
+// No authentication required - for landing page and demos
+
+app.get('/demo/leads', demoController.getDemoLeads);
+app.get('/demo/stats', demoController.getLiveStats);
+app.get('/demo/niches', demoController.getNichePresets);
+app.get('/demo/niches/:id', demoController.getNichePreset);
+app.get('/demo/export/templates', demoController.getExportTemplates);
+app.post('/demo/export', demoController.exportLeads);
 
 // ============ PUBLIC API (v1) ============
 // These routes use API key authentication for n8n/Make.com
