@@ -1,0 +1,8 @@
+{
+  "project_id": "ai-sdr",
+  "functions": {
+    "api": {
+      "verify_jwt": false
+    }
+  }
+}
