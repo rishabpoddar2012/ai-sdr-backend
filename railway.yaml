@@ -1,0 +1,39 @@
+name: AI SDR
+
+services:
+  - type: web
+    name: ai-sdr-api
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    healthcheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-sdr-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+  - type: cron
+    name: ai-sdr-worker
+    env: node
+    buildCommand: npm install
+    startCommand: npm run worker
+    schedule: 0 * * * *
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-sdr-db
+          property: connectionString
+
+databases:
+  - name: ai-sdr-db
+    databaseName: ai_sdr
+    user: ai_sdr

@@ -1,0 +1,39 @@
+name: Deploy to Supabase
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        
+    - name: Install Supabase CLI
+      run: npm install -g supabase
+      
+    - name: Deploy Edge Functions
+      env:
+        SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      run: |
+        supabase link --project-ref $SUPABASE_PROJECT_ID
+        supabase functions deploy api
+        
+    - name: Run Database Migrations
+      env:
+        SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      run: |
+        # Install psql
+        sudo apt-get update && sudo apt-get install -y postgresql-client
+        # Run migrations
+        psql $SUPABASE_DB_URL -f supabase/migrations/001_init.sql
