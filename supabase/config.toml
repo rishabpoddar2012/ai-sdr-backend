@@ -2,3 +2,6 @@ project_id = "qazrfivyfrgfcnibilzo"
 
 [functions.api]
 verify_jwt = false
+
+[functions.intent-radar]
+verify_jwt = false
