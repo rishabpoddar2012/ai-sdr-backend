@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.intent-radar]
 verify_jwt = false
+
+[functions.ai-closer]
+verify_jwt = false
+
+[functions.collect-signals]
+verify_jwt = false
