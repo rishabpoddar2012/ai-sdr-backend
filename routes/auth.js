@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const axios = require('axios');
 const { validationResult } = require('express-validator');
 const { User } = require('../models');
 
@@ -321,6 +322,135 @@ const updatePassword = async (req, res) => {
   }
 };
 
+// Google OAuth - Get auth URL
+const getGoogleAuthUrl = async (req, res) => {
+  try {
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL}/auth/google/callback`;
+    
+    const params = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'offline',
+      prompt: 'consent'
+    });
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+    res.json({
+      success: true,
+      data: { authUrl }
+    });
+  } catch (error) {
+    console.error('Google auth URL error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate Google auth URL'
+    });
+  }
+};
+
+// Google OAuth - Handle callback
+const googleCallback = async (req, res) => {
+  try {
+    const { code } = req.body;
+    
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: 'Authorization code required'
+      });
+    }
+
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL}/auth/google/callback`;
+
+    // Exchange code for tokens
+    const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
+      code,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code'
+    });
+
+    const { access_token } = tokenResponse.data;
+
+    // Get user info from Google
+    const userResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    const { id: googleId, email, name, picture } = userResponse.data;
+
+    // Check if user exists
+    let user = await User.findOne({ where: { googleId } });
+    let isNewUser = false;
+
+    if (!user) {
+      // Check if email already exists
+      user = await User.findOne({ where: { email } });
+      
+      if (user) {
+        // Link Google account to existing user
+        user.googleId = googleId;
+        user.avatarUrl = picture;
+        user.authProvider = 'google';
+        await user.save();
+      } else {
+        // Create new user
+        const nameParts = name ? name.split(' ') : ['', ''];
+        isNewUser = true;
+        
+        user = await User.create({
+          email,
+          googleId,
+          firstName: nameParts[0],
+          lastName: nameParts.slice(1).join(' '),
+          avatarUrl: picture,
+          authProvider: 'google',
+          plan: 'free',
+          leadsLimit: 50,
+          onboardingCompleted: false,
+          onboardingStep: 0
+        });
+      }
+    }
+
+    // Generate token
+    const token = generateToken(user.id);
+
+    res.json({
+      success: true,
+      message: isNewUser ? 'Account created successfully' : 'Login successful',
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          companyName: user.companyName,
+          avatarUrl: user.avatarUrl,
+          plan: user.plan,
+          planStatus: user.planStatus,
+          leadsLimit: user.leadsLimit,
+          leadsUsedThisMonth: user.leadsUsedThisMonth,
+          onboardingCompleted: user.onboardingCompleted,
+          onboardingStep: user.onboardingStep,
+          isNewUser
+        },
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Google callback error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Google authentication failed'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -328,5 +458,7 @@ module.exports = {
   updateProfile,
   forgotPassword,
   resetPassword,
-  updatePassword
+  updatePassword,
+  getGoogleAuthUrl,
+  googleCallback
 };

@@ -17,7 +17,7 @@ const User = sequelize.define('User', {
   },
   password: {
     type: DataTypes.STRING(255),
-    allowNull: false
+    allowNull: true // Allow null for OAuth users
   },
   firstName: DataTypes.STRING(100),
   lastName: DataTypes.STRING(100),
@@ -103,6 +103,55 @@ const User = sequelize.define('User', {
   keywords: {
     type: DataTypes.ARRAY(DataTypes.STRING),
     defaultValue: ['marketing agency', 'growth']
+  },
+  
+  // OAuth fields
+  googleId: {
+    type: DataTypes.STRING(255),
+    unique: true,
+    allowNull: true
+  },
+  avatarUrl: {
+    type: DataTypes.STRING(500),
+    allowNull: true
+  },
+  authProvider: {
+    type: DataTypes.ENUM('email', 'google'),
+    defaultValue: 'email'
+  },
+  
+  // Onboarding fields
+  onboardingCompleted: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  onboardingStep: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  productDescription: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  targetMarket: {
+    type: DataTypes.STRING(200),
+    allowNull: true
+  },
+  customerLocations: {
+    type: DataTypes.ARRAY(DataTypes.STRING),
+    defaultValue: []
+  },
+  scrapeSources: {
+    type: DataTypes.ARRAY(DataTypes.STRING),
+    defaultValue: []
+  },
+  industry: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  companySize: {
+    type: DataTypes.STRING(50),
+    allowNull: true
   },
   
   isActive: {

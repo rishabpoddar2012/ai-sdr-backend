@@ -15,6 +15,7 @@ const leadsController = require('./routes/leads');
 const settingsController = require('./routes/settings');
 const subscriptionController = require('./routes/subscription');
 const nichesController = require('./routes/niches');
+const onboardingController = require('./routes/onboarding');
 const { 
   authenticateApiKey, 
   getLeadsPublic, 
@@ -25,6 +26,7 @@ const {
   getApiUsage
 } = require('./routes/apiPublic');
 const demoController = require('./routes/demo');
+const competitorDefectorRoutes = require('./competitor-defector/routes');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -85,6 +87,10 @@ app.post('/api/auth/login', [
   body('password').exists()
 ], authController.login);
 
+// Google OAuth routes
+app.get('/api/auth/google', authController.getGoogleAuthUrl);
+app.post('/api/auth/google/callback', authController.googleCallback);
+
 // User routes (protected)
 app.get('/api/user/profile', authenticate, authController.getMe);
 app.put('/api/user/profile', authenticate, authController.updateProfile);
@@ -123,6 +129,17 @@ app.post('/api/niches/apply', authenticate, nichesController.applyNiche);
 app.post('/api/niches/custom', authenticate, nichesController.createCustomNiche);
 app.put('/api/niches/keywords', authenticate, nichesController.updateKeywords);
 app.put('/api/niches/sources', authenticate, nichesController.updateSources);
+
+// Onboarding routes (protected)
+app.get('/api/onboarding/status', authenticate, onboardingController.getOnboardingStatus);
+app.get('/api/onboarding/sources', authenticate, onboardingController.getScrapeSources);
+app.post('/api/onboarding', authenticate, onboardingController.saveOnboarding);
+app.get('/api/onboarding/scraper-configs', authenticate, onboardingController.getScraperConfigs);
+app.put('/api/onboarding/scraper-configs/:sourceKey', authenticate, onboardingController.updateScraperConfig);
+app.post('/api/onboarding/skip', authenticate, onboardingController.skipOnboarding);
+
+// Competitor Defector routes (protected)
+app.use('/api/competitor-defector', authenticate, competitorDefectorRoutes);
 
 // 404 handler
 app.use((req, res) => {
