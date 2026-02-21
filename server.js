@@ -16,6 +16,7 @@ const settingsController = require('./routes/settings');
 const subscriptionController = require('./routes/subscription');
 const nichesController = require('./routes/niches');
 const onboardingController = require('./routes/onboarding');
+const scraperController = require('./routes/scraper');
 const { 
   authenticateApiKey, 
   getLeadsPublic, 
@@ -137,6 +138,12 @@ app.post('/api/onboarding', authenticate, onboardingController.saveOnboarding);
 app.get('/api/onboarding/scraper-configs', authenticate, onboardingController.getScraperConfigs);
 app.put('/api/onboarding/scraper-configs/:sourceKey', authenticate, onboardingController.updateScraperConfig);
 app.post('/api/onboarding/skip', authenticate, onboardingController.skipOnboarding);
+
+// Scraper settings routes (protected)
+app.get('/api/scraper/config', authenticate, scraperController.getScraperConfig);
+app.put('/api/scraper/config', authenticate, scraperController.updateScraperConfig);
+app.post('/api/scraper/test', authenticate, scraperController.testScraper);
+app.get('/api/scraper/lead-types', authenticate, scraperController.getLeadTypes);
 
 // Competitor Defector routes (protected)
 app.use('/api/competitor-defector', authenticate, competitorDefectorRoutes);

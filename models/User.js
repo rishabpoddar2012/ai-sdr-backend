@@ -154,6 +154,50 @@ const User = sequelize.define('User', {
     allowNull: true
   },
   
+  // Subscription & Billing fields
+  subscriptionTier: {
+    type: DataTypes.ENUM('free', 'pro', 'enterprise'),
+    defaultValue: 'free'
+  },
+  subscriptionStatus: {
+    type: DataTypes.ENUM('active', 'cancelled', 'past_due', 'trialing'),
+    defaultValue: 'active'
+  },
+  stripeCustomerId: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  stripeSubscriptionId: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  leadsUsedThisMonth: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  leadsLimit: {
+    type: DataTypes.INTEGER,
+    defaultValue: 10
+  },
+  subscriptionStartDate: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  subscriptionEndDate: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  
+  // Scraper settings
+  scrapeFrequency: {
+    type: DataTypes.ENUM('hourly', 'daily', 'weekly', 'realtime'),
+    defaultValue: 'daily'
+  },
+  leadTypes: {
+    type: DataTypes.ARRAY(DataTypes.STRING),
+    defaultValue: ['hiring', 'budget_mentioned']
+  },
+  
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

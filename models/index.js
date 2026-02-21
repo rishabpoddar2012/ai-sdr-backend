@@ -3,6 +3,7 @@ const User = require('./User');
 const Lead = require('./Lead');
 const ScrapeSource = require('./ScrapeSource');
 const UserScraperConfig = require('./UserScraperConfig');
+const SubscriptionPlan = require('./SubscriptionPlan');
 
 // Define relationships
 User.hasMany(Lead, { foreignKey: 'userId', as: 'leads' });
@@ -19,7 +20,8 @@ const db = {
   User,
   Lead,
   ScrapeSource,
-  UserScraperConfig
+  UserScraperConfig,
+  SubscriptionPlan
 };
 
 module.exports = db;
