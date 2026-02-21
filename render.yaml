@@ -1,34 +1,27 @@
 services:
   - type: web
-    name: ai-sdr-api
-    runtime: node
-    repo: https://github.com/rishabpoddar2012/ai-sdr-backend
-    branch: main
+    name: ai-sdr-backend
+    env: node
     buildCommand: npm install
-    startCommand: npm start
-    plan: free
+    startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        fromDatabase:
-          name: ai-sdr-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
-      - key: JWT_EXPIRES_IN
-        value: 7d
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: FRONTEND_URL
-        value: https://ai-sdr-dashboard.vercel.app
-
-  # Note: Cron jobs require paid plan on Render
-  # For free tier, use GitHub Actions or manual trigger
-  # See: docs/WORKER_SCHEDULING.md
-
-databases:
-  - name: ai-sdr-db
-    databaseName: ai_sdr
-    user: ai_sdr
-    plan: free
+        value: https://ai-sdr.vercel.app
+      - key: API_BASE_URL
+        value: https://ai-sdr-backend.onrender.com
+    healthCheckPath: /health
+    autoDeploy: true
